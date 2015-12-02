@@ -393,74 +393,22 @@ class SshController(object):
         '''
             src can be a single file, list of files, or directory
             dst is always a directory, for simplicity
+
+            NOTE/FIXME: Currently using SCP due to sftp errors.
+            This is really misleading and should be changed once those
+            errors are figured out.
         '''
          
-        # Create the batch file
-        # - psftp cares about the destination file to be exact
-        # - sftp will accept a directory
-         
-        bfp, bfname = tempfile.mkstemp(text=True)
-        try:
-            with os.fdopen(bfp, 'w') as fp:
-                
-                if isinstance(src, str):
-                    if isdir(src):
-                        if mkdir:
-                            fp.write('mkdir "%s/%s"\n' % (dst, basename(src)))
-                        
-                        if is_windows:
-                            fp.write('put -r "%s" "%s/%s"\n' % (src, dst, basename(src)))
-                        else:
-                            fp.write('put -r "%s" "%s"\n' % (src, dst))
-                    else:
-                        if mkdir:
-                            fp.write('mkdir "%s"\n' % dst)
-                        
-                        fp.write('put "%s" "%s/%s"\n' % (src, dst, basename(src)))
-                else:
-                    if mkdir:
-                        fp.write('mkdir "%s"\n' % dst)
-                    
-                    for f in src:
-                        fp.write('put "%s" "%s/%s"\n' % (f, dst, basename(f)))
-            
-            sftp_args =['-b', bfname,
-                        '%s@%s' % (self.username, self.hostname)]
-            
-            
-            if is_windows:
-                cmd = join(self.win_bins, 'psftp.exe')
-                
-                # psftp has a -pw argument we can use, which is nice
-                sftp_args = [ cmd, '-pw', self.password ] + sftp_args
-                
-                try:
-                    subprocess.check_call(sftp_args)
-                except subprocess.CalledProcessError as e:
-                    raise SshExecError(e, e.returncode)
-                
-            else:
-                cmd = shutil.which('sftp')
-                if cmd is None:
-                    raise Error("Cannot find sftp executable!")
-                
-                if self._allow_mitm:
-                    sftp_args = mitm_args + sftp_args
-                
-                # Must disable BatchMode, else password interaction doesn't work
-                sftp_args = [cmd, '-oBatchMode=no'] + sftp_args
-                
-                retval, _ = ssh_exec_pass(self.password, sftp_args,
-                                          suppress_known_hosts=self._allow_mitm)
-                if retval != 0:
-                    raise SshExecError('Command %s returned non-zero error status %s' % (sftp_args, retval),
-                                       retval)
-            
-        finally:
-            try:
-                os.unlink(bfname)
-            except:
-                pass
+        cmd = shutil.which('scp')
+        scp_args = [cmd, '-r', src,
+                    '%s@%s:%s' % (self.username, self.hostname, dst)]
+
+        retval, _ = ssh_exec_pass(self.password, scp_args,
+                                  suppress_known_hosts=self._allow_mitm)
+
+        if retval != 0:
+            raise SshExecError('Command %s returned non-zero error status %s' % (sftp_args, retval),
+                               retval)
     
     def poor_sync(self, src, dst):
         '''
